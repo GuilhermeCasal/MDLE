@@ -33,10 +33,11 @@ class DGIM:
         self.buckets = []
         self.history = {}
 
-    def add_bit(self, bit, timestamp):
+    def new_bit(self, bit, timestamp):
+        count = 0
         # Remove outdated buckets
         old_len = len(self.buckets)
-        self.buckets = [bucket for bucket in self.buckets if timestamp - bucket[1] < self.N]
+        self.buckets = [bucket for bucket in self.buckets if timestamp - self.N < bucket[1]]
 
         if (old_len != len(self.buckets)):
             print(f'Number of buckets discarded by timestamp incompatibility: {old_len-len(self.buckets)}')
@@ -45,27 +46,56 @@ class DGIM:
         # Add new bucket if the bit is 1
         if bit == 1:
             self.buckets.append((1, timestamp))
-
-        # Merge buckets if needed
-        self._merge_buckets()
-
+            self.check_and_merge()
+        
         if timestamp % self.N == 0:
             self.count_ones(timestamp)
 
-    def _merge_buckets(self):
-        i = len(self.buckets) - 1
-        j = i + 1
-        while i > 1:
-            if self.buckets[i][0] == self.buckets[i - 1][0] == self.buckets[i - 2][0]:
-                self.buckets[i - 1] = (self.buckets[i - 1][0] * 2, self.buckets[i - 1][1])
-                del self.buckets[i - 2]
-                i -= 1
-            else:
-                i -= 1
 
-        if j != len(self.buckets):
-            print(f'Number of merged buckets: {j-len(self.buckets)}')
-            print()
+    def check_and_merge(self):
+        while True:
+            merge_ocurred = False
+            count_map = {}
+            for i, bucket in enumerate(self.buckets):
+                if bucket[1] in count_map:
+                    count_map[bucket[1]].append(i)
+                else:
+                    count_map[bucket[1]] = [i] 
+                
+                if len(count_map[bucket[1]]) == 3:
+                    index = count_map[bucket[1]]
+                    self._merge_buckets(index)
+                    merge_ocurred = True
+                    break
+            if not merge_ocurred:
+                break
+
+
+    def _merge_buckets(self, index):
+        first, second = index[0], index[1]
+        first_bucket = self.buckets[first]
+        second_bucket = self.buckets[second]
+        
+
+        ts = max(first_bucket[0], second_bucket[0])
+        sum = first_bucket[1] + second_bucket[1]
+        merge = (ts,sum)
+        self.buckets[first] = merge
+        del self.buckets[second]
+        
+        # i = len(self.buckets) - 1
+        # j = i + 1
+        # while i > 1:
+        #     if self.buckets[i][0] == self.buckets[i - 1][0] == self.buckets[i - 2][0]:
+        #         self.buckets[i - 1] = (self.buckets[i - 1][0] * 2, self.buckets[i - 1][1])
+        #         del self.buckets[i - 2]
+        #         i -= 1
+        #     else:
+        #         i -= 1
+
+        # if j != len(self.buckets):
+        #     print(f'Number of merged buckets: {j-len(self.buckets)}')
+        #     print()
 
     def _updateHistory(self, timestamp, estimate):
         begin = timestamp-self.k if timestamp >= self.k else 0
