@@ -28,16 +28,16 @@
 class DGIM:
     def __init__(self, N, k, bit_stream):
         self.N = N
-        self.k = k
+        self.k = 2
         self.bit_stream = bit_stream
         self.buckets = []
         self.history = {}
 
-    def new_bit(self, bit, timestamp):
-        count = 0
+    def new_bit(self, bit):
         # Remove outdated buckets
+        self.buckets = [(time+1,count) for time, count in self.buckets]
         old_len = len(self.buckets)
-        self.buckets = [bucket for bucket in self.buckets if timestamp - self.N < bucket[1]]
+        self.buckets = [bucket for bucket in self.buckets if self.N >= bucket[1]]
 
         if (old_len != len(self.buckets)):
             print(f'Number of buckets discarded by timestamp incompatibility: {old_len-len(self.buckets)}')
@@ -45,12 +45,11 @@ class DGIM:
 
         # Add new bucket if the bit is 1
         if bit == 1:
-            self.buckets.append((timestamp, 1))
+            self.buckets.append((0, 1))
             self.check_and_merge()
         
-        if timestamp % self.N == 0:
-            self.count_ones(timestamp)
-
+        
+        print(self.buckets)
 
     def check_and_merge(self):
         while True:
@@ -77,25 +76,12 @@ class DGIM:
         second_bucket = self.buckets[second]
         
 
-        ts = max(first_bucket[0], second_bucket[0])
+        ts = min(first_bucket[0], second_bucket[0])
         sum = first_bucket[1] + second_bucket[1]
         merge = (ts,sum)
         self.buckets[first] = merge
         del self.buckets[second]
         
-        # i = len(self.buckets) - 1
-        # j = i + 1
-        # while i > 1:
-        #     if self.buckets[i][0] == self.buckets[i - 1][0] == self.buckets[i - 2][0]:
-        #         self.buckets[i - 1] = (self.buckets[i - 1][0] * 2, self.buckets[i - 1][1])
-        #         del self.buckets[i - 2]
-        #         i -= 1
-        #     else:
-        #         i -= 1
-
-        # if j != len(self.buckets):
-        #     print(f'Number of merged buckets: {j-len(self.buckets)}')
-        #     print()
 
     def _updateHistory(self, timestamp, estimate):
         begin = timestamp-self.k if timestamp >= self.k else 0
@@ -106,19 +92,15 @@ class DGIM:
         self.history[timestamp] = [true_count, estimate]
 
 
-    def count_ones(self, timestamp):
+    def count_ones(self):
         count = 0
-        print(self.buckets)
-        for i, (num, time) in enumerate(sorted(self.buckets, key=lambda x: x[1], reverse=True)):
-            if timestamp == 0:
-                count += num
-            if timestamp-time < self.k:
-                if i < len(self.buckets)-1:
-                    count += num
-                else:
-                    count += num // 2
-        self._updateHistory(timestamp, count)
-
+        for i, (time, sum) in enumerate(sorted(self.buckets, key=lambda x: x[1], reverse=True)):
+            if time < self.k and self.buckets[len(self.buckets)-i-1][0] > self.k:
+                count += sum/2
+            else:
+                count += sum
+        # self._updateHistory(timestamp, count)
+        print(count)
         return count
 
     def results(self):
@@ -140,7 +122,8 @@ def test_dgim():
     num_bits = 21  # Total number of bits to generate
 
     # Generate a synthetic bit stream
-    bit_stream = generate_bit_stream(num_bits, prob)
+    # bit_stream = generate_bit_stream(num_bits, prob)
+    bit_stream = [0,1,0,1,1,1,1,1,1]
     print("Generated bit stream:", bit_stream)
 
     dgim = DGIM(N, k, bit_stream)
@@ -148,9 +131,9 @@ def test_dgim():
 
     # Add bits to DGIM and print estimates at intervals
     for bit in bit_stream:
-        dgim.add_bit(bit, timestamp)
-        timestamp += 1
-    
+        dgim.new_bit(bit)
+        dgim.count_ones()
+
     dgim.results()
 
 
