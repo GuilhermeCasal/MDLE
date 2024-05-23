@@ -45,7 +45,7 @@ class DGIM:
 
         # Add new bucket if the bit is 1
         if bit == 1:
-            self.buckets.append((1, timestamp))
+            self.buckets.append((timestamp, 1))
             self.check_and_merge()
         
         if timestamp % self.N == 0:
