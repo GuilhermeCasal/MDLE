@@ -1,180 +1,104 @@
-# from pyspark.sql import SparkSession
-# from pyspark.sql.functions import explode, split
-
-
-# spark = SparkSession.builder \
-#         .appName("Project3_MLSD_Part1") \
-#         .getOrCreate()
-
-
-# socketData = spark.readStream \
-#                  .format("socket") \
-#                   .option("host", "localhost") \
-#                    .option("port", 9999) \
-#                     .load()
-
-
-# split_lines = socketData.withColumn("value", explode(split(socketData["value"], ",")))
-
-# query = split_lines.writeStream \
-#                     .outputMode("append") \
-#                      .format("console") \
-#                       .start()
-
-# query.awaitTermination()
 
 ############################################################################################################################################
 
-class DGIM:
-    def __init__(self, N, k, bit_stream):
-        self.N = N
-        self.k = 2
-        self.bit_stream = bit_stream
-        self.buckets = []
-        self.history = {}
-
-    def new_bit(self, bit):
-        # Remove outdated buckets
-        self.buckets = [(time+1,count) for time, count in self.buckets]
-        old_len = len(self.buckets)
-        self.buckets = [bucket for bucket in self.buckets if self.N >= bucket[1]]
-
-        if (old_len != len(self.buckets)):
-            print(f'Number of buckets discarded by timestamp incompatibility: {old_len-len(self.buckets)}')
-            print()
-
-        # Add new bucket if the bit is 1
-        if bit == 1:
-            self.buckets.append((0, 1))
-            self.check_and_merge()
-        
-        
-        print(self.buckets)
-
-    def check_and_merge(self):
-        while True:
-            merge_ocurred = False
-            count_map = {}
-            for i, bucket in enumerate(self.buckets):
-                if bucket[1] in count_map:
-                    count_map[bucket[1]].append(i)
-                else:
-                    count_map[bucket[1]] = [i] 
-                
-                if len(count_map[bucket[1]]) == 3:
-                    index = count_map[bucket[1]]
-                    self._merge_buckets(index)
-                    merge_ocurred = True
-                    break
-            if not merge_ocurred:
-                break
-
-
-    def _merge_buckets(self, index):
-        first, second = index[0], index[1]
-        first_bucket = self.buckets[first]
-        second_bucket = self.buckets[second]
-        
-
-        ts = min(first_bucket[0], second_bucket[0])
-        sum = first_bucket[1] + second_bucket[1]
-        merge = (ts,sum)
-        self.buckets[first] = merge
-        del self.buckets[second]
-        
-
-    def _updateHistory(self, timestamp, estimate):
-        begin = timestamp-self.k if timestamp >= self.k else 0
-        if begin == 0 :
-            true_count = sum(self.bit_stream[0:1])
-        else:
-            true_count = sum(self.bit_stream[begin:timestamp])
-        self.history[timestamp] = [true_count, estimate]
-
-
-    def count_ones(self):
-        count = 0
-        for i, (time, sum) in enumerate(sorted(self.buckets, key=lambda x: x[1], reverse=True)):
-            if time < self.k and self.buckets[len(self.buckets)-i-1][0] > self.k:
-                count += sum/2
-            else:
-                count += sum
-        # self._updateHistory(timestamp, count)
-        print(count)
-        return count
-
-    def results(self):
-        print('\n\n')
-        for timestamp, (true, estimate) in self.history.items():
-            print(f"Timestamp: {timestamp}; Estimated count of 1s in the last {self.k} bits: {estimate}; True count of 1s: {true}")
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import *
+from pyspark.sql.streaming.state import GroupStateTimeout
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+import json
+import pandas as pd
+from DGIM import DGIM
 
 
 
-import random
+def update_buckets(stream_id, df_iter, state):
 
-def generate_bit_stream(num_bits, prob):
-    return [1 if random.random() < prob else 0 for _ in range(num_bits)]
+    if not state.exists:
+        # Initialize DGIM algorithm if state does not exist
+        dgim = DGIM(N=1000, k=50)
+        # Serialize the initial state
+        serialized_buckets = json.dumps(dgim.buckets)
+        state.update((serialized_buckets, None))
+    else:
+        # Retrieve and deserialize the existing state
+        serialized_buckets = state.get
+        buckets = json.loads(serialized_buckets)
+        dgim = DGIM(N=1000, k=50, buckets=buckets)
 
-def test_dgim():
-    N = 10  # Total window size
-    k = 5   # Sub-window size for estimation
-    prob = 0.5  # Probability of a bit being 1
-    num_bits = 21  # Total number of bits to generate
+    # Process each partition of the DataFrame
+    for df in df_iter:
+        # Process each row in the partition
+        for _, row in df.iterrows():
+            # Extract stream_id and bit value from the row
+            bit = row["value"]
+            # Update the DGIM algorithm with the incoming bit
+            dgim.new_bit(bit)
 
-    # Generate a synthetic bit stream
-    # bit_stream = generate_bit_stream(num_bits, prob)
-    bit_stream = [0,1,0,1,1,1,1,1,1]
-    print("Generated bit stream:", bit_stream)
+    # Update the state
+    serialized_buckets = json.dumps(dgim.buckets)
+    state.update((serialized_buckets, None))
 
-    dgim = DGIM(N, k, bit_stream)
-    timestamp = 0
-
-    # Add bits to DGIM and print estimates at intervals
-    for bit in bit_stream:
-        dgim.new_bit(bit)
-        dgim.count_ones()
-
-    dgim.results()
+    # Yield empty DataFrame (no output needed for each batch)
+    yield pd.DataFrame({"stream_id": [str(stream_id)], "bit_count": [0], "estimated_count": [dgim.estimate_count()]})
 
 
 if __name__ == "__main__":
-    test_dgim()
+    # Define parameters
+    N = 1000  # Specify the size of the sliding window
+    k = 50  # Specify the time window for counting 1s
 
+    # Define the output schema with fields for counts
+    output_schema = StructType([
+        StructField("stream_id", StringType()),             
+        StructField("bit_count", LongType()),            
+        StructField("estimated_count", LongType()),         
+    ])
 
+    # Define the state schema
+    state_schema = StructType([
+        StructField("last_timestamp", LongType()),
+        StructField("size", IntegerType())
+    ])
 
-import socket
+    # Initialize Spark session
+    spark = SparkSession.builder \
+                         .appName("DGIMStreaming") \
+                          .getOrCreate()
 
-# class SocketClient():
-#     def __init__(self, host, port):
-#         # Create a socket object
-#         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Read streaming data from socket (or any other source)
+    data = spark.readStream \
+                 .format("socket") \
+                  .option("host", "localhost") \
+                   .option("port", 9999) \
+                    .option("includeTimestamp", "false") \
+                     .load()
 
-#         # Connect to the server
-#         self.client_socket.connect((host, port))
-#         print('Connected to server at {}:{}'.format(host, port))
-
-#     def read_data(self):
-#         try:
-#             while True:
-#                 # Receive data from the server
-#                 data = self.client_socket.recv(1024)
-#                 if not data:
-#                     break
-#                 # Decode and print the received data
-#                 print(data.decode('utf-8').strip())
-#         except Exception as e:
-#             print("An error occurred:", e)
-#         finally:
-#             self.client_socket.close()
-
-# if __name__ == "__main__":
-#     # Define the server host and port
-#     HOST, PORT = 'localhost', 9999
+    # Parse JSON data and explode to individual rows
+    data = data.selectExpr("cast(value as string) as json_str") \
+                .select(F.from_json("json_str", "MAP<STRING, INT>").alias("bitstream")) \
+                 .selectExpr("explode(bitstream) as (stream_id, value)")
     
-#     # Create a client instance and connect to the server
-#     client = SocketClient(HOST, PORT)
-    
-#     # Read and process data from the server
-#     client.read_data()
+    # # Print the received data
+    # query = data.writeStream \
+    #              .foreach(print) \
+    #               .start()
+    # query.awaitTermination()
 
-############################################################################################################################################
+    # Update state for each group using applyInPandasWithState
+    updated_data = data.groupby("stream_id").applyInPandasWithState(
+        update_buckets,
+        outputStructType=output_schema,
+        stateStructType=state_schema,
+        outputMode="append",
+        timeoutConf=GroupStateTimeout.NoTimeout
+    )
+
+    # Start the query
+    query = updated_data.writeStream \
+                         .outputMode("append") \
+                          .format("console") \
+                           .start()
+
+    # Await termination
+    query.awaitTermination()

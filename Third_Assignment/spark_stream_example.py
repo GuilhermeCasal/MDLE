@@ -14,77 +14,77 @@ import sys
 # Check for bucket merging
 
 
-# def update_buckets(key, df_iterator, state):
-#     if not state.exists:
-#         # state is a tuple
-#         # set it according to stateStructType
-#         state.update((...,))
+def update_buckets(key, df_iterator, state):
+    if not state.exists:
+        # state is a tuple
+        # set it according to stateStructType
+        state.update((...,))
 
-#     current_state = state.get
+    current_state = state.get
 
-#     # your state update logic
+    # your state update logic
             
-#     for df in df_iterator:
-#         print(df)
+    for df in df_iterator:
+        print(df)
 
-#     state.update(current_state)
+    state.update(current_state)
 
-#     # emit a pandas dataframe, according to outputStructType
-#     yield pd.DataFrame(...)
-
-
-
-# if __name__ == "__main__":
-#     # Define stream and socket details
-#     if len(sys.argv) > 1:
-#         NUM_STREAMS = int(sys.argv[1])
-
-#     if len(sys.argv) == 4:
-#         HOST, PORT = sys.argv[2], int(sys.argv[3])
-#     else:
-#         HOST, PORT = 'localhost', 9999
-
-#     spark = SparkSession.builder \
-#               .appName("StructuredNetworkCount") \
-#                 .config("spark.driver.host","127.0.0.1") \
-#                   .config("spark.driver.memory", "2g") \
-#                     .config("spark.executor.memory", "2g") \
-#                       .getOrCreate()
-
-#     data = spark \
-#             .readStream.format("socket") \
-#               .option("host", HOST).option("port", PORT) \
-#                 .option('includeTimestamp', 'true') \
-#                   .load()
+    # emit a pandas dataframe, according to outputStructType
+    yield pd.DataFrame(...)
 
 
-#     # alternatively, define input schema as StructType
-#     # schema = StructType([StructField(f"{i}", IntegerType()) for i in range(NUM_STREAMS)])
-#     data = data.select(
-#         #"timestamp",
-#         # transform json string to dict {"0": 0, "1": 0, "2": 1, ...}
-#         #F.from_json(data.value, "MAP<STRING,INT>").alias("bitstream"),
-#         # alternatively, explode dict entries to rows 
-#         F.explode(F.from_json(data.value, "MAP<STRING,INT>")).alias("stream_id", "value"),
-#     )
 
-#     # Use this to debug your data ingestion
-#     query = data.writeStream.foreach(print).start()
-#     query.awaitTermination()
+if __name__ == "__main__":
+    # Define stream and socket details
+    if len(sys.argv) > 1:
+        NUM_STREAMS = int(sys.argv[1])
+
+    if len(sys.argv) == 4:
+        HOST, PORT = sys.argv[2], int(sys.argv[3])
+    else:
+        HOST, PORT = 'localhost', 9999
+
+    spark = SparkSession.builder \
+              .appName("StructuredNetworkCount") \
+                .config("spark.driver.host","127.0.0.1") \
+                  .config("spark.driver.memory", "2g") \
+                    .config("spark.executor.memory", "2g") \
+                      .getOrCreate()
+
+    data = spark \
+            .readStream.format("socket") \
+              .option("host", HOST).option("port", PORT) \
+                .option('includeTimestamp', 'true') \
+                  .load()
 
 
-#     # use groupby(...).applyInPandasWithState(...)
-#     # to update a shared state
-#     # data = data.groupby(...).applyInPandasWithState(update_buckets, outputStructType="...",
-#     #                                 stateStructType="...", outputMode="append", timeoutConf=GroupStateTimeout.NoTimeout)
+    # alternatively, define input schema as StructType
+    # schema = StructType([StructField(f"{i}", IntegerType()) for i in range(NUM_STREAMS)])
+    data = data.select(
+        #"timestamp",
+        # transform json string to dict {"0": 0, "1": 0, "2": 1, ...}
+        #F.from_json(data.value, "MAP<STRING,INT>").alias("bitstream"),
+        # alternatively, explode dict entries to rows 
+        F.explode(F.from_json(data.value, "MAP<STRING,INT>")).alias("stream_id", "value"),
+    )
 
-#     # query = data \
-#     #     .writeStream \
-#     #         .outputMode("append") \
-#     #             .format("console") \
-#     #                 .start()
+    # Use this to debug your data ingestion
+    query = data.writeStream.foreach(print).start()
+    query.awaitTermination()
 
-#     # query.awaitTermination()
+
+    # use groupby(...).applyInPandasWithState(...)
+    # to update a shared state
+    # data = data.groupby(...).applyInPandasWithState(update_buckets, outputStructType="...",
+    #                                 stateStructType="...", outputMode="append", timeoutConf=GroupStateTimeout.NoTimeout)
+
+    # query = data \
+    #     .writeStream \
+    #         .outputMode("append") \
+    #             .format("console") \
+    #                 .start()
+
+    # query.awaitTermination()
 
 
 
