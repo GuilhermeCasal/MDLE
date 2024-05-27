@@ -16,4 +16,4 @@ class BinaryMultiStreamGenerator():
         # send data as dict
         data = json.dumps(dict([(i, b) for i, b in enumerate(bits)]))
         client_socket.send((data + "\n").encode("utf-8"))
-        time.sleep(5)
+        time.sleep(0.1)
