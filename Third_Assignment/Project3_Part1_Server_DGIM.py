@@ -2,7 +2,7 @@
 
 import socket
 import sys
-from binary_multi_stream_generator import BinaryMultiStreamGenerator
+from binary_multi_stream_generator_DGIM import BinaryMultiStreamGenerator
 
 
 class SocketServer():

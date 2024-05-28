@@ -10,6 +10,18 @@ import numpy as np
 
 
 def new_bit(buckets, bit, N):
+        """
+        Update the buckets with a new bit and return the updated buckets.
+        
+        Args:
+        - buckets (list): A list of tuples representing buckets, where each tuple contains
+                        a timestamp and a count.
+        - bit (int): The incoming bit (0 or 1).
+        - N (int): The sliding window size.
+        
+        Returns:
+        - list: The updated list of buckets after processing the new bit.
+        """
         if buckets: 
             # Increment the buckets timestamp
             buckets = [(time+1,count) for time, count in buckets]
@@ -23,7 +35,7 @@ def new_bit(buckets, bit, N):
                     break
             buckets = new_buckets
 
-        # Add a new bucket if the incoming bit is 1
+        # Add a new bucket if the incoming bit is 1 and check for merging
         if bit == 1:
             buckets.append((0, 1))
             buckets = check_and_merge(buckets)
@@ -150,20 +162,13 @@ def update_buckets(stream_id, df_iter, state):
     state.update((buckets,count_ones))
 
     # Yield empty DataFrame (no output needed for each batch)
-    yield pd.DataFrame({"stream_id": [str(stream_id)], "bit_count": [count_ones], "estimated_count": [estimate_count(buckets)]})
+    yield pd.DataFrame({"stream_id": [str(stream_id)], "bit_count": [count_ones], "buckets": [buckets]})
 
 
 if __name__ == "__main__":
     # # Define parameters
     # N = 1000  # Specify the size of the sliding window
     # k = 50  # Specify the time window for counting 1s
-
-    # Define the output schema with fields for counts
-    output_schema = StructType([
-        StructField("stream_id", StringType()),             
-        StructField("bit_count", LongType()),            
-        StructField("estimated_count", LongType()),
-    ])
 
     # Define the state schema
     bucket_schema = StructType([
@@ -173,6 +178,13 @@ if __name__ == "__main__":
     state_schema = StructType([
         StructField("buckets", ArrayType(bucket_schema)),
         StructField('real_count', LongType())
+    ])
+
+    # Define the output schema with fields for counts
+    output_schema = StructType([
+        StructField("stream_id", StringType()),             
+        StructField("bit_count", LongType()),            
+        StructField("buckets", ArrayType(bucket_schema)),
     ])
 
     # Initialize Spark session
