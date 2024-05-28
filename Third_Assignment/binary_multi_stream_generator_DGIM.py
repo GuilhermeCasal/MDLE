@@ -7,7 +7,9 @@ random.seed(57)
 class BinaryMultiStreamGenerator():
   def __init__(self, num_streams):
     super().__init__()
-    self.probs = [max(0.01, round(random.random() / 10, 2)) for _ in range(num_streams)]
+    # self.probs = [max(0.01, round(random.random() / 10, 2)) for _ in range(num_streams)]
+    self.probs = [max(0.2, 0.8) for _ in range(num_streams)]
+
 
   def generate(self, client_socket):
     while True:

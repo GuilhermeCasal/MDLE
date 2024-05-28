@@ -3,6 +3,7 @@
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql import udf
 from pyspark.sql.streaming.state import GroupStateTimeout
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, ArrayType
 import pandas as pd
@@ -107,7 +108,7 @@ def merge_buckets(buckets, index):
         return buckets
 
 
-def estimate_count(buckets, k=50):
+def estimate_count(buckets, k=10):
         """
         Estimates the number of 1s in the bit stream from the current time to k.
         
@@ -151,18 +152,18 @@ def update_buckets(stream_id, df_iter, state):
     # Process each partition of the DataFrame
     for df in df_iter:
         # Extract stream_id and bit value from the row
-        bit = df["value"].iloc[1]
-        # Update the DGIM algorithm with the incoming bit
-        buckets = new_bit(buckets, bit, 1000)
-        # Update the real count
-        if bit == 1:
-            count_ones += 1
+        bit = df["value"]
+        # # Update the DGIM algorithm with the incoming bit
+        # buckets = new_bit(buckets, bit, 20)
+        # # Update the real count
+        # if bit == 1:
+        #     count_ones += 1
 
     # Update the state
-    state.update((buckets,count_ones))
+    state.update((buckets, count_ones))
 
     # Yield empty DataFrame (no output needed for each batch)
-    yield pd.DataFrame({"stream_id": [str(stream_id)], "bit_count": [count_ones], "buckets": [buckets]})
+    yield pd.DataFrame({"stream_id": [str(stream_id)], "bit_count": [bit], "buckets": [buckets]})
 
 
 if __name__ == "__main__":
@@ -177,13 +178,13 @@ if __name__ == "__main__":
     ])
     state_schema = StructType([
         StructField("buckets", ArrayType(bucket_schema)),
-        StructField('real_count', LongType())
+        StructField('real_count', IntegerType())
     ])
 
     # Define the output schema with fields for counts
     output_schema = StructType([
         StructField("stream_id", StringType()),             
-        StructField("bit_count", LongType()),            
+        StructField("real_count", IntegerType()),            
         StructField("buckets", ArrayType(bucket_schema)),
     ])
 
@@ -191,6 +192,8 @@ if __name__ == "__main__":
     spark = SparkSession.builder \
                          .appName("DGIMStreaming") \
                           .getOrCreate()
+    
+    spark.sparkContext.setLogLevel("ERROR")
 
     # Read streaming data from socket (or any other source)
     data = spark.readStream \
@@ -201,11 +204,9 @@ if __name__ == "__main__":
                      .load()
 
     # Parse JSON data and explode to individual rows
-    data = data.selectExpr("cast(value as string) as json_str") \
-                .select(F.from_json("json_str", "MAP<STRING, INT>").alias("bitstream")) \
-                 .selectExpr("explode(bitstream) as (stream_id, value)")
+    data = data.select(F.explode(F.from_json(data.value, "MAP<STRING,INT>")).alias("stream_id", "value"))
             
-    # # Print the received data
+    # Print the received data
     # query = data.writeStream \
     #              .foreach(print) \
     #               .start()
@@ -222,9 +223,9 @@ if __name__ == "__main__":
 
     # Start the query
     query = updated_data.writeStream \
-                         .outputMode("append") \
-                          .format("console") \
-                           .start()
+                          .outputMode("append") \
+                           .format("console") \
+                            .start()
 
     # Await termination
     query.awaitTermination()
