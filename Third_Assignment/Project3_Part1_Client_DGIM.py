@@ -1,9 +1,7 @@
-
 ############################################################################################################################################
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql import udf
 from pyspark.sql.streaming.state import GroupStateTimeout
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, ArrayType
 import pandas as pd
@@ -11,18 +9,6 @@ import numpy as np
 
 
 def new_bit(buckets, bit, N):
-        """
-        Update the buckets with a new bit and return the updated buckets.
-        
-        Args:
-        - buckets (list): A list of tuples representing buckets, where each tuple contains
-                        a timestamp and a count.
-        - bit (int): The incoming bit (0 or 1).
-        - N (int): The sliding window size.
-        
-        Returns:
-        - list: The updated list of buckets after processing the new bit.
-        """
         if buckets: 
             # Increment the buckets timestamp
             buckets = [(time+1,count) for time, count in buckets]
@@ -36,7 +22,7 @@ def new_bit(buckets, bit, N):
                     break
             buckets = new_buckets
 
-        # Add a new bucket if the incoming bit is 1 and check for merging
+        # Add a new bucket if the incoming bit is 1
         if bit == 1:
             buckets.append((0, 1))
             buckets = check_and_merge(buckets)
@@ -108,7 +94,7 @@ def merge_buckets(buckets, index):
         return buckets
 
 
-def estimate_count(buckets, k=10):
+def estimate_count(buckets, k=5):
         """
         Estimates the number of 1s in the bit stream from the current time to k.
         
@@ -142,7 +128,7 @@ def update_buckets(stream_id, df_iter, state):
 
     if not state.exists:
         buckets = []
-        count_ones = 0
+        count_ones = []
         state.update((buckets, count_ones))
     else:
         # Retrieve the existing state
@@ -152,24 +138,23 @@ def update_buckets(stream_id, df_iter, state):
     # Process each partition of the DataFrame
     for df in df_iter:
         # Extract stream_id and bit value from the row
-        bit = df["value"]
-        # # Update the DGIM algorithm with the incoming bit
-        # buckets = new_bit(buckets, bit, 20)
-        # # Update the real count
-        # if bit == 1:
-        #     count_ones += 1
+        bit = df["value"].iloc[1]
+        # Update the DGIM algorithm with the incoming bit
+        buckets = new_bit(buckets, bit, 10)
+        # Increase the timestamp of the real bits count
+        count_ones = [time+1 for time in count_ones]
+        # Update the real count by adding the current timestep (0)
+        if bit == 1:
+            count_ones.append(0)
 
     # Update the state
-    state.update((buckets, count_ones))
+    state.update((buckets,count_ones))
 
     # Yield empty DataFrame (no output needed for each batch)
-    yield pd.DataFrame({"stream_id": [str(stream_id)], "bit_count": [bit], "buckets": [buckets]})
+    yield pd.DataFrame({"stream_id": [str(stream_id)], "count_ones": [count_ones], "buckets": [buckets]})
 
 
 if __name__ == "__main__":
-    # # Define parameters
-    # N = 1000  # Specify the size of the sliding window
-    # k = 50  # Specify the time window for counting 1s
 
     # Define the state schema
     bucket_schema = StructType([
@@ -178,13 +163,13 @@ if __name__ == "__main__":
     ])
     state_schema = StructType([
         StructField("buckets", ArrayType(bucket_schema)),
-        StructField('real_count', IntegerType())
+        StructField('count_ones', ArrayType(LongType())),
     ])
 
     # Define the output schema with fields for counts
     output_schema = StructType([
         StructField("stream_id", StringType()),             
-        StructField("real_count", IntegerType()),            
+        StructField('count_ones', ArrayType(LongType())),
         StructField("buckets", ArrayType(bucket_schema)),
     ])
 
@@ -204,9 +189,11 @@ if __name__ == "__main__":
                      .load()
 
     # Parse JSON data and explode to individual rows
-    data = data.select(F.explode(F.from_json(data.value, "MAP<STRING,INT>")).alias("stream_id", "value"))
+    data = data.selectExpr("cast(value as string) as json_str") \
+                .select(F.from_json("json_str", "MAP<STRING, INT>").alias("bitstream")) \
+                 .selectExpr("explode(bitstream) as (stream_id, value)")
             
-    # Print the received data
+    # # Print the received data
     # query = data.writeStream \
     #              .foreach(print) \
     #               .start()
@@ -221,11 +208,16 @@ if __name__ == "__main__":
         timeoutConf=GroupStateTimeout.NoTimeout
     )
 
+    from pyspark.sql.functions import pandas_udf
+    @pandas_udf(IntegerType())
+    def estimate_udf(buckets):
+        return estimate_count(buckets)
+
     # Start the query
     query = updated_data.writeStream \
-                          .outputMode("append") \
-                           .format("console") \
-                            .start()
+                         .outputMode("append") \
+                          .format("console") \
+                           .start()
 
     # Await termination
     query.awaitTermination()

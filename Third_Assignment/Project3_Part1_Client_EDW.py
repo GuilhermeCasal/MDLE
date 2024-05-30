@@ -3,15 +3,15 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.streaming.state import GroupStateTimeout
-from pyspark.sql.types import StructType, StructField, StringType, LongType, FloatType
+from pyspark.sql.types import StructType, StructField, StringType, FloatType
 import pandas as pd
 
 def update_buckets(stream_id, df_iter, state):
 
-    c = 0.1
+    c = 1e-6
 
     if not state.exists:
-        estimate_pop = 0
+        estimate_pop = 0.0
         state.update((estimate_pop,))
     else:
         # Retrieve the existing state
@@ -20,16 +20,15 @@ def update_buckets(stream_id, df_iter, state):
     # Process each partition of the DataFrame
     for df in df_iter:
         # Extract stream_id and bit value from the row
-        bit = df["value"]
-        if estimate_pop != 0:
-            # Update the DGIM algorithm with the incoming bit
-            estimate_pop *= (1-c) 
-            # Update the real count
-            if bit == 1 :
-                estimate_pop += 1
+        bit = df["value"].iloc[1]
+        # Update the DGIM algorithm with the incoming bit
+        estimate_pop *= (1-c) 
+        # Update the real count
+        if bit == 1 :
+            estimate_pop += 1
 
     # Remove non popular items (based on a threhsold)
-    estimate_pop = 0 if estimate_pop < 0.5 else estimate_pop
+    estimate_pop = 0.0 if estimate_pop < 0.5 else estimate_pop
     # Update the state
     state.update((estimate_pop,))
 
@@ -38,14 +37,12 @@ def update_buckets(stream_id, df_iter, state):
 
 
 if __name__ == "__main__":
-    # # Define parameters
-    # N = 1000  # Specify the size of the sliding window
-    # k = 50  # Specify the time window for counting 1s
+    # Number of Streams Being Received: 20
 
     # Define the output schema with fields for counts
     output_schema = StructType([
         StructField("stream_id", StringType()),             
-        StructField("estimated_pop", LongType()),
+        StructField("estimated_pop", FloatType()),
     ])
 
     # Define the state schema
@@ -59,6 +56,8 @@ if __name__ == "__main__":
                           .getOrCreate()
     
     spark.sparkContext.setLogLevel("ERROR")
+    import warnings
+    warnings.filterwarnings("ignore", category=FutureWarning)
 
     # Read streaming data from socket (or any other source)
     data = spark.readStream \
