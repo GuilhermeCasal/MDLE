@@ -32,6 +32,6 @@ if __name__ == "__main__":
 
 
     ss = SocketServer(HOST, PORT)
-    num_streams = 20
+    num_streams = 1000
     generator = BinaryMultiStreamGenerator(num_streams)
     generator.generate(ss.client_socket)
